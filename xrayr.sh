@@ -2,8 +2,9 @@
 
 # ==========================================================
 #  XrayR Installer & Manager - Tương thích V2board & VLESS
-#  Hỗ trợ: VMess, VLESS, Trojan với Xray-core mới nhất
+#  Hỗ trợ: VMess, VLESS, Trojan - Mod giới hạn IP Online
 #  Chứng chỉ mặc định: /etc/XrayR/certvpn.crt & certvpn.key
+#  Kho lưu trữ chính chủ: tuangiangbp95/xrayr-vpn
 # ==========================================================
 
 red='\033[0;31m'
@@ -75,32 +76,47 @@ generate_cert() {
     fi
 }
 
-# Tải & Cài đặt XrayR core mới nhất
+# Cài đặt XrayR binary (Hỗ trợ Báo cáo IP Online & VLESS)
 install_core() {
-    echo -e "${green}Đang tải nhân XrayR mới nhất từ XrayR-project...${plain}"
+    echo -e "${green}Đang tải nhân XrayR (Hỗ trợ giới hạn IP Online & VLESS)...${plain}"
     mkdir -p /usr/local/XrayR/
     cd /usr/local/XrayR/
 
-    # Lấy phiên bản mới nhất từ Github API (mặc định v0.9.4 nếu bị giới hạn rate limit)
-    last_version=$(curl -Ls "https://api.github.com/repos/XrayR-project/XrayR/releases/latest" 2>/dev/null | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
-    if [[ -z "$last_version" ]]; then
-        last_version="v0.9.4"
-    fi
-
-    echo -e "${green}Phiên bản XrayR được chọn: ${last_version}${plain}"
-    url="https://github.com/XrayR-project/XrayR/releases/download/${last_version}/XrayR-linux-${arch}.zip"
+    # Nguồn 1: Tải từ chính GitHub Release của bạn (tuangiangbp95) - Tự chủ 100% không sợ chết link
+    url="https://github.com/tuangiangbp95/xrayr-vpn/releases/download/v1.0/XrayR-linux-${arch}.zip"
     wget -N --no-check-certificate -O /usr/local/XrayR/XrayR-linux.zip ${url}
 
-    if [[ $? -ne 0 || ! -f /usr/local/XrayR/XrayR-linux.zip ]]; then
-        url="https://github.com/XrayR-project/XrayR/releases/latest/download/XrayR-linux-${arch}.zip"
+    # Nguồn 2: Tải dự phòng từ web server gocvpn.net
+    if [[ $? -ne 0 || ! -s /usr/local/XrayR/XrayR-linux.zip ]]; then
+        echo -e "${yellow}Thử nguồn dự phòng từ web gocvpn.net...${plain}"
+        url="https://gocvpn.net/XrayR-linux-${arch}.zip"
         wget -N --no-check-certificate -O /usr/local/XrayR/XrayR-linux.zip ${url}
+    fi
+
+    # Nguồn 3: Tải dự phòng từ qtai2901
+    if [[ $? -ne 0 || ! -s /usr/local/XrayR/XrayR-linux.zip ]]; then
+        echo -e "${yellow}Thử nguồn dự phòng 2...${plain}"
+        url="https://github.com/qtai2901/xrayr/releases/download/0.9.0/XrayR-linux-${arch}.zip"
+        wget -N --no-check-certificate -O /usr/local/XrayR/XrayR-linux.zip ${url}
+    fi
+
+    # Nguồn 4: Tải dự phòng từ XrayR-project
+    if [[ $? -ne 0 || ! -s /usr/local/XrayR/XrayR-linux.zip ]]; then
+        echo -e "${yellow}Thử nguồn dự phòng chính thức XrayR-project...${plain}"
+        url="https://github.com/XrayR-project/XrayR/releases/download/v0.9.4/XrayR-linux-${arch}.zip"
+        wget -N --no-check-certificate -O /usr/local/XrayR/XrayR-linux.zip ${url}
+    fi
+
+    if [[ ! -s /usr/local/XrayR/XrayR-linux.zip ]]; then
+        echo -e "${red}Lỗi: Không tải được file XrayR-linux.zip từ tất cả các nguồn!${plain}"
+        exit 1
     fi
 
     unzip -o XrayR-linux.zip
     rm -f XrayR-linux.zip
     chmod +x /usr/local/XrayR/XrayR
 
-    # Copy database geoip & geosite
+    # Copy geo files
     mkdir -p /etc/XrayR/
     [[ -f geoip.dat ]] && cp -f geoip.dat /etc/XrayR/
     [[ -f geosite.dat ]] && cp -f geosite.dat /etc/XrayR/
@@ -132,7 +148,7 @@ EOF
     systemctl daemon-reload
     systemctl enable XrayR
 
-    # Tạo lệnh quản lý nhanh trong terminal (xrayr / XrayR)
+    # Tạo lệnh tắt nhanh trong terminal
     cat > /usr/bin/xrayr << 'EOF'
 #!/bin/bash
 case "$1" in
@@ -169,7 +185,7 @@ EOF
     ln -sf /usr/bin/xrayr /usr/bin/XrayR
 }
 
-# Khởi tạo khung file cấu hình /etc/XrayR/config.yml
+# Tạo header config.yml
 init_config() {
     mkdir -p /etc/XrayR/
     cat > /etc/XrayR/config.yml <<EOF
@@ -191,7 +207,7 @@ Nodes:
 EOF
 }
 
-# Nhập thông tin node và lưu vào config.yml
+# Nhập thông tin node và append vào config.yml
 add_node_prompt() {
     read -p " Nhập domain web (không cần https://): " api_host
     [ -z "${api_host}" ] && api_host="0"
@@ -230,14 +246,14 @@ add_node_prompt() {
     echo " -> Node ID: ${node_id}"
     echo "--------------------------------"
 
-    # Tự động lấy IP Public của VPS làm mặc định
+    # Lấy IP VPS tự động làm mặc định
     vps_ip=$(curl -s4 ifconfig.me || curl -s4 api.ipify.org || echo "0.0.0.0")
     read -p " Nhập IP VPS hoặc Domain Cert (mặc định: ${vps_ip}): " CertDomain
     [ -z "${CertDomain}" ] && CertDomain="${vps_ip}"
     echo " -> CertDomain: ${CertDomain}"
     echo "--------------------------------"
 
-    # Append node vào /etc/XrayR/config.yml
+    # Ghi vào /etc/XrayR/config.yml
     cat >> /etc/XrayR/config.yml <<EOF
   -
     PanelType: "V2board"
@@ -281,7 +297,7 @@ add_node_prompt() {
 EOF
 }
 
-# Hàm thêm nhiều node cùng lúc
+# Menu thêm n node
 batch_add_nodes() {
     read -p "Nhập số lượng node cần thêm (mặc định: 1): " count
     [ -z "${count}" ] && count="1"
@@ -293,7 +309,7 @@ batch_add_nodes() {
     done
 }
 
-# Menu chính
+# Main Menu
 clear
 echo -e "${green}====================================================${plain}"
 echo -e "${green}    TRÌNH CÀI ĐẶT & QUẢN LÝ XRAYR (MOD VLESS MỚI)   ${plain}"
