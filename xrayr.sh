@@ -2,9 +2,8 @@
 
 # ==========================================================
 #  XrayR Installer & Manager - Tương thích V2board & VLESS
-#  Hỗ trợ: VMess, VLESS, Trojan - Mod giới hạn IP Online
+#  Hỗ trợ: VMess, VLESS, Trojan với Xray-core mới nhất
 #  Chứng chỉ mặc định: /etc/XrayR/certvpn.crt & certvpn.key
-#  Kho lưu trữ chính chủ: tuangiangbp95/xrayr-vpn
 # ==========================================================
 
 red='\033[0;31m'
@@ -62,7 +61,7 @@ install_base() {
     fi
 }
 
-# Tạo chứng chỉ certvpn (Hạn dùng 10 năm)
+# Tạo chứng chỉ certvpn
 generate_cert() {
     mkdir -p /etc/XrayR/
     if [[ ! -f /etc/XrayR/certvpn.crt || ! -f /etc/XrayR/certvpn.key ]]; then
@@ -116,10 +115,15 @@ install_core() {
     rm -f XrayR-linux.zip
     chmod +x /usr/local/XrayR/XrayR
 
-    # Copy geo files
+    # Copy geo và config template files
     mkdir -p /etc/XrayR/
     [[ -f geoip.dat ]] && cp -f geoip.dat /etc/XrayR/
     [[ -f geosite.dat ]] && cp -f geosite.dat /etc/XrayR/
+    [[ -f custom_outbound.json ]] && cp -f custom_outbound.json /etc/XrayR/
+    [[ -f route.json ]] && cp -f route.json /etc/XrayR/
+    [[ -f dns.json ]] && cp -f dns.json /etc/XrayR/
+    [[ -f custom_inbound.json ]] && cp -f custom_inbound.json /etc/XrayR/
+    [[ -f rulelist ]] && cp -f rulelist /etc/XrayR/
 
     # Tạo Systemd Service
     cat > /etc/systemd/system/XrayR.service <<EOF
@@ -148,7 +152,7 @@ EOF
     systemctl daemon-reload
     systemctl enable XrayR
 
-    # Tạo lệnh tắt nhanh trong terminal
+    # Tạo lệnh tắt xrayr trong terminal
     cat > /usr/bin/xrayr << 'EOF'
 #!/bin/bash
 case "$1" in
@@ -185,9 +189,102 @@ EOF
     ln -sf /usr/bin/xrayr /usr/bin/XrayR
 }
 
-# Tạo header config.yml
+# Tạo header config.yml và các file cấu hình phụ trợ
 init_config() {
     mkdir -p /etc/XrayR/
+    
+    # Tạo sẵn custom_outbound.json nếu chưa có
+    if [[ ! -f /etc/XrayR/custom_outbound.json ]]; then
+        cat > /etc/XrayR/custom_outbound.json << 'EOF'
+[
+  {
+    "tag": "IPv4_out",
+    "protocol": "freedom",
+    "settings": {}
+  },
+  {
+    "tag": "IPv6_out",
+    "protocol": "freedom",
+    "settings": {
+      "domainStrategy": "UseIPv6"
+    }
+  },
+  {
+    "tag": "socks5-warp",
+    "protocol": "socks",
+    "settings": {
+      "servers": [
+        {
+          "address": "127.0.0.1",
+          "port": 1080
+        }
+      ]
+    }
+  },
+  {
+    "protocol": "blackhole",
+    "tag": "block"
+  }
+]
+EOF
+    fi
+
+    # Tạo sẵn dns.json nếu chưa có
+    if [[ ! -f /etc/XrayR/dns.json ]]; then
+        cat > /etc/XrayR/dns.json << 'EOF'
+{
+  "servers": [
+    "1.1.1.1",
+    "8.8.8.8",
+    "localhost"
+  ],
+  "tag": "dns_inbound"
+}
+EOF
+    fi
+
+    # Tạo sẵn route.json nếu chưa có
+    if [[ ! -f /etc/XrayR/route.json ]]; then
+        cat > /etc/XrayR/route.json << 'EOF'
+{
+  "domainStrategy": "IPOnDemand",
+  "rules": [
+    {
+      "type": "field",
+      "outboundTag": "block",
+      "ip": [
+        "geoip:private"
+      ]
+    },
+    {
+      "type": "field",
+      "outboundTag": "block",
+      "protocol": [
+        "bittorrent"
+      ]
+    },
+    {
+      "type": "field",
+      "outboundTag": "socks5-warp",
+      "domain": []
+    },
+    {
+      "type": "field",
+      "outboundTag": "IPv6_out",
+      "domain": [
+        "geosite:netflix"
+      ]
+    },
+    {
+      "type": "field",
+      "outboundTag": "IPv4_out",
+      "network": "udp,tcp"
+    }
+  ]
+}
+EOF
+    fi
+
     cat > /etc/XrayR/config.yml <<EOF
 Log:
   Level: none
@@ -315,7 +412,7 @@ echo -e "${green}====================================================${plain}"
 echo -e "${green}    TRÌNH CÀI ĐẶT & QUẢN LÝ XRAYR (MOD VLESS MỚI)   ${plain}"
 echo -e "${green}    Hỗ trợ VMess / VLESS / Trojan - CertVPN SSL     ${plain}"
 echo -e "${green}====================================================${plain}"
-echo -e "  ${green}1.${plain} Cài đặt mới XrayR (Tải core, tạo cert, nhập node)"
+echo -e "  ${green}1.${plain} Cài đặt mới XrayR (Tạo lại toàn bộ)"
 echo -e "  ${green}2.${plain} Cập nhật lại cấu hình (Xóa cấu hình cũ & nhập lại)"
 echo -e "  ${green}3.${plain} Thêm Node mới vào cấu hình hiện tại"
 echo -e "  ${green}4.${plain} Khởi động lại XrayR"
